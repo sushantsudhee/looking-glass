@@ -3,40 +3,82 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Playable Preview</title>
+    <title>Looking Glass</title>
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
     <header class="app-header">
-        <h1>Playable Preview</h1>
+        <div class="header-left">
+            <h1>Looking Glass</h1>
+            <span class="header-sub">Ad Preview · Moloco</span>
+        </div>
+        <div class="tag-type-selector">
+            <button class="toggle active" data-type="playable">Playable</button>
+            <button class="toggle" data-type="js">JS Tag</button>
+            <button class="toggle" data-type="vast">VAST</button>
+        </div>
     </header>
 
     <main class="app-main">
         <section class="controls">
             <div class="field">
-                <label for="snippetInput">Playable snippet</label>
-                <textarea id="snippetInput" placeholder="Paste your playable snippet here..." spellcheck="false"></textarea>
+                <label for="snippetInput" id="snippetLabel">Playable snippet</label>
+                <textarea id="snippetInput" placeholder="Paste your ad tag here..." spellcheck="false"></textarea>
             </div>
             <div class="buttons">
                 <button id="previewBtn" class="primary">Preview</button>
                 <button id="clearAllBtn">Clear</button>
             </div>
 
-            <div class="field inline">
-                <label for="engagementTapsInput">Taps for engagement (0-9)</label>
-                <input id="engagementTapsInput" type="number" min="0" max="9" step="1" value="1">
+            <!-- Only shown in Playable mode -->
+            <div id="playableControls">
+                <div class="field inline">
+                    <label for="engagementTapsInput">Taps for engagement (0–9)</label>
+                    <input id="engagementTapsInput" type="number" min="0" max="9" step="1" value="1">
+                </div>
+                <div class="field inline">
+                    <label for="redirectionTapsInput">Taps for redirection (0–9)</label>
+                    <input id="redirectionTapsInput" type="number" min="0" max="9" step="1" value="0">
+                </div>
             </div>
-            <div class="field inline">
-                <label for="redirectionTapsInput">Taps for redirection (0-9)</label>
-                <input id="redirectionTapsInput" type="number" min="0" max="9" step="1" value="0">
-            </div>
+
+            <!-- Expand to manually set macro test values -->
+            <details class="macro-overrides">
+                <summary>Macro overrides</summary>
+                <div class="overrides-grid">
+                    <div class="field inline">
+                        <label>{{bundle}} · {{publisher.bundle}}</label>
+                        <input id="ovBundle" type="text" value="com.example.testapp">
+                    </div>
+                    <div class="field inline">
+                        <label>{{appname}} · {{publisher.name}}</label>
+                        <input id="ovAppname" type="text" value="Test App">
+                    </div>
+                    <div class="field inline">
+                        <label>{{deviceid}} · {{device.idfa}} · {{device.gaid}}</label>
+                        <input id="ovDeviceid" type="text" value="00000000-0000-0000-0000-000000000000">
+                    </div>
+                    <div class="field inline">
+                        <label>Click URL (#CLICK_URL_ESC# · #CLICK_TEMPLATE_ESC#)</label>
+                        <input id="ovClickUrl" type="text" value="https://example.com">
+                    </div>
+                    <div class="field inline">
+                        <label>{{width}}</label>
+                        <input id="ovWidth" type="text" value="320">
+                    </div>
+                    <div class="field inline">
+                        <label>{{height}}</label>
+                        <input id="ovHeight" type="text" value="480">
+                    </div>
+                </div>
+            </details>
         </section>
 
         <section class="preview-and-logs">
             <div class="preview-column">
                 <div class="device-wrap portrait" id="deviceWrap">
                     <div class="device-bezel">
-                        <iframe id="previewFrame" title="Playable Preview Frame" sandbox="allow-scripts allow-same-origin allow-popups allow-forms" scrolling="no"></iframe>
+                        <iframe id="previewFrame" title="Ad Preview Frame" sandbox="allow-scripts allow-same-origin allow-popups allow-forms" scrolling="no"></iframe>
                     </div>
                 </div>
                 <div class="device-size" id="deviceSize"></div>
@@ -55,6 +97,7 @@
                         <button class="tab" data-tab="error">Errors</button>
                         <button class="tab" data-tab="network">Network</button>
                     </div>
+                    <button id="exportLogBtn">Export JSON</button>
                 </div>
                 <div id="logList" class="log-list" aria-live="polite"></div>
             </div>
@@ -62,7 +105,4 @@
     </main>
     <script src="./app.js"></script>
 </body>
-    
 </html>
-
-

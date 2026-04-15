@@ -52,12 +52,13 @@
                                 <option value="3">Unity</option>
                                 <option value="4">Chartboost</option>
                             </select>
-                            <select id="brgDeviceOs" title="Device OS">
-                                <option value="1">iOS</option>
-                                <option value="2">Android</option>
-                            </select>
                         </div>
                     </div>
+                    <!-- brgDeviceOs kept for JS compat, hidden — OS doesn't affect playable rendering -->
+                    <select id="brgDeviceOs" style="display:none">
+                        <option value="1">iOS</option>
+                        <option value="2">Android</option>
+                    </select>
                     <button id="fetchPreviewBtn" class="primary">Fetch &amp; Preview</button>
                 </div>
             </div>

@@ -676,6 +676,9 @@
 
       // 4. BRG resolution
       const useBrg = brgToggle?.checked && brgFormat !== null && resolvedPlatformId;
+      const originalMacros = findUnresolvedMacros(rawTag); // macros in raw creative
+      let brgResolved = false;
+
       if (useBrg) {
         const exchVal = parseInt(brgExchange?.value || '1', 10);
         const osVal   = parseInt(brgDeviceOs?.value || '1', 10);
@@ -686,6 +689,7 @@
           const adm        = brgJson?.seatbid?.[0]?.bid?.[0]?.adm;
           if (adm) {
             rawTag = adm;
+            brgResolved = true;
             addLog('info', 'BRG ADM extracted — macros resolved by production ADM system.', 'success');
           } else {
             addLog('info', 'BRG response contained no ADM — using raw creative tag.', 'error');
@@ -707,6 +711,23 @@
       _skipValidation = true;
       previewBtn?.click();
       _skipValidation = false;
+
+      // 6. Macro resolution report
+      const remainingMacros = findUnresolvedMacros(rawTag);
+      addLog('info', '─────────────────────────────');
+      if (remainingMacros.length === 0) {
+        addLog('info', '✓ Creative OK — all macros resolved', 'success');
+      } else {
+        addLog('info', `⚠ Creative loaded with ${remainingMacros.length} unresolved macro(s)`, 'error');
+        remainingMacros.forEach(m => addLog('info', `  · ${m}`, 'error'));
+      }
+      if (originalMacros.length > 0) {
+        const source = brgResolved ? 'resolved by BRG' : 'substituted with test values';
+        addLog('info', `Macros ${source} (${originalMacros.length}):`);
+        originalMacros.forEach(m => addLog('info', `  · ${m}`));
+      } else {
+        addLog('info', 'No macros found in original creative tag.');
+      }
 
     } catch (err) {
       addLog('error', 'Lookup failed: ' + err.message);

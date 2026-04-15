@@ -329,14 +329,16 @@ select:focus { outline: none; border-color: var(--primary); }
 }
 
 .device-wrap {
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px;
-    overflow: hidden;
+    overflow: visible;
     min-height: 0;
+    clip-path: inset(0 round 12px);
 }
 .device-bezel {
     background: #000;
@@ -345,7 +347,7 @@ select:focus { outline: none; border-color: var(--primary); }
     width: 360px;
     height: 640px;
     transform-origin: center center;
-    display: inline-block;
+    display: block;
 }
 .device-wrap iframe {
     width: 360px;
@@ -355,8 +357,9 @@ select:focus { outline: none; border-color: var(--primary); }
     border-radius: 14px;
     display: block;
 }
-.device-wrap.landscape .device-bezel { width: 640px; height: 360px; }
-.device-wrap.landscape iframe        { width: 640px; height: 360px; }
+/* landscape overrides — must exist so measureBezelNaturalSize reads correct dims */
+.device-wrap.landscape .device-bezel { width: 640px; height: 360px; border-radius: 18px; }
+.device-wrap.landscape iframe        { width: 640px; height: 360px; border-radius: 12px; }
 
 .device-size {
     text-align: center;
@@ -396,7 +399,7 @@ select:focus { outline: none; border-color: var(--primary); }
     justify-content: space-between;
     gap: 8px;
 }
-.tabs { display: flex; gap: 3px; flex-wrap: wrap; }
+.tabs { display: flex; gap: 3px; flex-wrap: nowrap; overflow-x: auto; }
 .tab {
     background: transparent;
     border: 1px solid transparent;

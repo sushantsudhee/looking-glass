@@ -21,6 +21,44 @@
 
     <main class="app-main">
         <section class="controls">
+            <!-- Creative Lookup (Phase 2 + 3) -->
+            <details class="cid-lookup" id="cidLookupSection">
+                <summary>Creative Lookup</summary>
+                <div class="cid-fields">
+                    <div class="field inline">
+                        <label for="apiKeyInput">API Key</label>
+                        <input id="apiKeyInput" type="password" placeholder="ca_..." autocomplete="off">
+                    </div>
+                    <div class="field inline">
+                        <label for="platformIdInput">Platform ID <span class="label-hint">(for BRG)</span></label>
+                        <input id="platformIdInput" type="text" placeholder="e.g. SCOPELY">
+                    </div>
+                    <div class="field inline">
+                        <label for="cidInput">Creative ID (CID)</label>
+                        <input id="cidInput" type="text" placeholder="e.g. Q2XSOg89y3bfAuXt">
+                    </div>
+                    <div class="brg-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="brgToggle" checked>
+                            Resolve with BRG
+                        </label>
+                        <div class="brg-selects" id="brgSelects">
+                            <select id="brgExchange" title="Exchange">
+                                <option value="1">AppLovin</option>
+                                <option value="2">Fyber</option>
+                                <option value="3">Unity</option>
+                                <option value="4">Chartboost</option>
+                            </select>
+                            <select id="brgDeviceOs" title="Device OS">
+                                <option value="1">iOS</option>
+                                <option value="2">Android</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button id="fetchPreviewBtn" class="primary">Fetch &amp; Preview</button>
+                </div>
+            </details>
+
             <div class="field">
                 <label for="snippetInput" id="snippetLabel">Playable snippet</label>
                 <textarea id="snippetInput" placeholder="Paste your ad tag here..." spellcheck="false"></textarea>

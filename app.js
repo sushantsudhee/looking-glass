@@ -411,6 +411,272 @@
     addLog(d.type || 'info', d.message);
   });
 
+  // ─── CID Lookup DOM refs ───────────────────────────────────────────────────
+  const apiKeyInput      = document.getElementById('apiKeyInput');
+  const platformIdInput  = document.getElementById('platformIdInput');
+  const cidInput         = document.getElementById('cidInput');
+  const brgToggle        = document.getElementById('brgToggle');
+  const brgSelects       = document.getElementById('brgSelects');
+  const brgExchange      = document.getElementById('brgExchange');
+  const brgDeviceOs      = document.getElementById('brgDeviceOs');
+  const fetchPreviewBtn  = document.getElementById('fetchPreviewBtn');
+
+  // Restore saved API key
+  const savedKey = localStorage.getItem('lg_api_key');
+  if (savedKey && apiKeyInput) apiKeyInput.value = savedKey;
+
+  // Show/hide BRG selects based on toggle
+  brgToggle?.addEventListener('change', () => {
+    if (brgSelects) brgSelects.style.display = brgToggle.checked ? '' : 'none';
+  });
+
+  // ─── Auth token (cached per session) ──────────────────────────────────────
+  let _cachedToken = null;
+
+  async function getAuthToken(apiKey) {
+    if (_cachedToken) return _cachedToken;
+    const res = await fetch('https://api.moloco.cloud/cm/v1/auth/tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => res.statusText);
+      throw new Error(`Auth failed (${res.status}): ${txt}`);
+    }
+    const data = await res.json();
+    _cachedToken = data.token;
+    return _cachedToken;
+  }
+
+  // ─── Creative lookup ───────────────────────────────────────────────────────
+  async function fetchCreative(token, creativeId) {
+    const res = await fetch(`https://api.moloco.cloud/cm/v1/creatives/${encodeURIComponent(creativeId)}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => res.statusText);
+      throw new Error(`Creative lookup failed (${res.status}): ${txt}`);
+    }
+    return res.json();
+  }
+
+  // ─── Proto / grpc-web helpers ──────────────────────────────────────────────
+
+  function encodeVarint(n) {
+    const bytes = [];
+    while (n > 0x7F) {
+      bytes.push((n & 0x7F) | 0x80);
+      n >>>= 7;
+    }
+    bytes.push(n & 0x7F);
+    return new Uint8Array(bytes);
+  }
+
+  // Returns [varint(bytes.length), ...bytes]
+  function lenDelim(bytes) {
+    const lv = encodeVarint(bytes.length);
+    const out = new Uint8Array(lv.length + bytes.length);
+    out.set(lv); out.set(bytes, lv.length);
+    return out;
+  }
+
+  // Returns the varint-encoded proto field tag
+  function protoTag(fieldNum, wireType) {
+    return encodeVarint((fieldNum << 3) | wireType);
+  }
+
+  function concatUint8Arrays(arrays) {
+    const total = arrays.reduce((s, a) => s + a.length, 0);
+    const out = new Uint8Array(total);
+    let pos = 0;
+    for (const a of arrays) { out.set(a, pos); pos += a.length; }
+    return out;
+  }
+
+  // Encode GenerateBidResponseRequest and wrap in grpc-web frame
+  function encodeGrpcWebRequest(exchangeType, deviceOsType, creativeFormat, platformId, creativeId) {
+    const enc = new TextEncoder();
+    const parts = [];
+
+    if (exchangeType) { parts.push(protoTag(1, 0)); parts.push(encodeVarint(exchangeType)); }
+    if (deviceOsType) { parts.push(protoTag(2, 0)); parts.push(encodeVarint(deviceOsType)); }
+    if (creativeFormat){ parts.push(protoTag(3, 0)); parts.push(encodeVarint(creativeFormat)); }
+    if (platformId)   { const b = enc.encode(platformId);  parts.push(protoTag(4, 2)); parts.push(lenDelim(b)); }
+    if (creativeId)   { const b = enc.encode(creativeId);  parts.push(protoTag(5, 2)); parts.push(lenDelim(b)); }
+
+    const msg   = concatUint8Arrays(parts);
+    const frame = new Uint8Array(5 + msg.length);
+    frame[0]    = 0; // no compression
+    new DataView(frame.buffer).setUint32(1, msg.length, false); // big-endian length
+    frame.set(msg, 5);
+    return frame;
+  }
+
+  // Decode GenerateBidResponseResponse (field 1 = json_str)
+  function decodeProtoJsonStr(bytes) {
+    let pos = 0;
+    while (pos < bytes.length) {
+      let tag = 0, shift = 0;
+      while (pos < bytes.length) {
+        const b = bytes[pos++];
+        tag |= (b & 0x7F) << shift;
+        if (!(b & 0x80)) break;
+        shift += 7;
+      }
+      const fieldNum = tag >>> 3;
+      const wireType = tag & 0x7;
+      if (wireType === 2) {
+        let len = 0; shift = 0;
+        while (pos < bytes.length) {
+          const b = bytes[pos++];
+          len |= (b & 0x7F) << shift;
+          if (!(b & 0x80)) break;
+          shift += 7;
+        }
+        const fieldBytes = bytes.slice(pos, pos + len);
+        pos += len;
+        if (fieldNum === 1) return new TextDecoder().decode(fieldBytes);
+      } else if (wireType === 0) {
+        while (pos < bytes.length && (bytes[pos++] & 0x80));
+      } else if (wireType === 5) { pos += 4; }
+        else if (wireType === 1) { pos += 8; }
+        else break;
+    }
+    return null;
+  }
+
+  // ─── BRG call ──────────────────────────────────────────────────────────────
+  const BRG_URL = 'https://cfe-gateway-rp76syjtkq-uc.a.run.app/appbase.bidresponse.v1.BidResponse/GenerateBidResponse';
+
+  async function callBRG(token, exchangeType, deviceOsType, creativeFormat, platformId, creativeId) {
+    const body = encodeGrpcWebRequest(exchangeType, deviceOsType, creativeFormat, platformId, creativeId);
+    const res = await fetch(BRG_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type':     'application/grpc-web+proto',
+        'Authorization':    `Bearer ${token}`,
+        'Moloco-Bff-Auth':  'morse',
+        'Moloco-Bff-Name':  'prod_appbase_go',
+      },
+      body,
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => res.statusText);
+      throw new Error(`BRG call failed (${res.status}): ${txt}`);
+    }
+    const buf  = await res.arrayBuffer();
+    const view = new DataView(buf);
+    let pos    = 0;
+    while (pos + 5 <= buf.byteLength) {
+      const flag = view.getUint8(pos);
+      const len  = view.getUint32(pos + 1, false);
+      pos += 5;
+      if (flag & 0x80) { pos += len; continue; } // trailer
+      const jsonStr = decodeProtoJsonStr(new Uint8Array(buf, pos, len));
+      pos += len;
+      if (jsonStr) return jsonStr;
+    }
+    throw new Error('No data frame in BRG response');
+  }
+
+  // ─── Fetch & Preview handler ───────────────────────────────────────────────
+  fetchPreviewBtn?.addEventListener('click', async () => {
+    const apiKey     = apiKeyInput?.value.trim()    || '';
+    const platformId = platformIdInput?.value.trim() || '';
+    const cid        = cidInput?.value.trim()        || '';
+
+    if (!apiKey) { addLog('error', 'Enter your Moloco API key.'); return; }
+    if (!cid)    { addLog('error', 'Enter a Creative ID.');       return; }
+
+    fetchPreviewBtn.disabled    = true;
+    fetchPreviewBtn.textContent = 'Fetching...';
+    logs.length = 0; renderLogs();
+
+    try {
+      // Persist API key
+      localStorage.setItem('lg_api_key', apiKey);
+      _cachedToken = null; // force re-auth in case key changed
+
+      // 1. Auth
+      addLog('info', 'Authenticating...');
+      const token = await getAuthToken(apiKey);
+      addLog('info', 'Auth token obtained.', 'success');
+
+      // 2. Creative lookup
+      addLog('info', `Fetching creative: ${cid}`);
+      const envelope = await fetchCreative(token, cid);
+      const creative = envelope.creative || envelope;
+      const cType    = creative.type || 'UNKNOWN';
+      addLog('info', `Creative type: ${cType}`, 'success');
+
+      // 3. Map creative type → tag mode
+      let rawTag    = '';
+      let detectedType = 'js';
+      let brgFormat = null; // 1=VIDEO, 2=PLAYABLE
+
+      if (cType === 'RICH_CUSTOM_HTML') {
+        detectedType = 'playable';
+        brgFormat    = 2;
+        rawTag       = creative.rich_custom_html?.entry_html || '';
+      } else if (cType === 'VIDEO') {
+        detectedType = 'vast';
+        brgFormat    = 1;
+        rawTag       = creative.video?.vast_url || creative.video?.vast_xml || '';
+      } else {
+        addLog('info', `Type ${cType} — BRG not supported. Showing raw creative JSON.`);
+        rawTag = JSON.stringify(creative, null, 2);
+      }
+
+      // Switch tag-type UI
+      document.querySelectorAll('.tag-type-selector .toggle').forEach(b => b.classList.remove('active'));
+      const typeBtn = document.querySelector(`.tag-type-selector .toggle[data-type="${detectedType}"]`);
+      if (typeBtn) typeBtn.classList.add('active');
+      tagType = detectedType;
+      snippetLabel.textContent       = TYPE_META[tagType].label;
+      snippetInput.placeholder       = TYPE_META[tagType].placeholder;
+      playableControls.style.display = tagType === 'playable' ? '' : 'none';
+
+      // 4. BRG resolution
+      const useBrg = brgToggle?.checked && brgFormat !== null && platformId;
+      if (useBrg) {
+        const exchVal = parseInt(brgExchange?.value || '1', 10);
+        const osVal   = parseInt(brgDeviceOs?.value || '1', 10);
+        addLog('info', `Calling BRG (exchange=${exchVal}, os=${osVal}, format=${brgFormat})...`);
+        try {
+          const brgJsonStr = await callBRG(token, exchVal, osVal, brgFormat, platformId, cid);
+          const brgJson    = JSON.parse(brgJsonStr);
+          const adm        = brgJson?.seatbid?.[0]?.bid?.[0]?.adm;
+          if (adm) {
+            rawTag = adm;
+            addLog('info', 'BRG ADM extracted — macros resolved by production ADM system.', 'success');
+          } else {
+            addLog('info', 'BRG response contained no ADM — using raw creative tag.', 'error');
+          }
+        } catch (brgErr) {
+          const isCors = brgErr.message.includes('Failed to fetch') || brgErr.message.includes('NetworkError');
+          addLog('info',
+            isCors
+              ? `BRG blocked by CORS (only works from portal.moloco.cloud) — using raw creative tag.`
+              : `BRG error: ${brgErr.message} — using raw creative tag.`,
+            'error');
+        }
+      } else if (brgFormat !== null && !platformId) {
+        addLog('info', 'Platform ID not set — skipping BRG. Macros will use test values.');
+      }
+
+      // 5. Fill & preview
+      snippetInput.value = rawTag;
+      previewBtn?.click();
+
+    } catch (err) {
+      addLog('error', 'Lookup failed: ' + err.message);
+    } finally {
+      fetchPreviewBtn.disabled    = false;
+      fetchPreviewBtn.textContent = 'Fetch & Preview';
+    }
+  });
+
   // ─── Init ──────────────────────────────────────────────────────────────────
   setOrientation('portrait');
   requestAnimationFrame(fitPreviewToContainer);

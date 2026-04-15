@@ -713,20 +713,25 @@
       _skipValidation = false;
 
       // 6. Macro resolution report
-      const remainingMacros = findUnresolvedMacros(rawTag);
+      // In BRG mode: check what BRG left unresolved in the ADM.
+      // In test-value mode: simulate applyMacros first, then check what has no test value.
+      const trulyUnresolved = brgResolved
+        ? findUnresolvedMacros(rawTag)
+        : findUnresolvedMacros(applyMacros(rawTag, buildMacroMap()));
+
       addLog('info', '─────────────────────────────');
-      if (remainingMacros.length === 0) {
-        addLog('info', '✓ Creative OK — all macros resolved', 'success');
-      } else {
-        addLog('info', `⚠ Creative loaded with ${remainingMacros.length} unresolved macro(s)`, 'error');
-        remainingMacros.forEach(m => addLog('info', `  · ${m}`, 'error'));
-      }
-      if (originalMacros.length > 0) {
-        const source = brgResolved ? 'resolved by BRG' : 'substituted with test values';
-        addLog('info', `Macros ${source} (${originalMacros.length}):`);
+      if (trulyUnresolved.length === 0) {
+        const how = brgResolved ? 'resolved by BRG' : 'resolved with test values';
+        addLog('info', `✓ Creative OK — ${originalMacros.length} macro(s) ${how}`, 'success');
         originalMacros.forEach(m => addLog('info', `  · ${m}`));
       } else {
-        addLog('info', 'No macros found in original creative tag.');
+        addLog('info', `⚠ ${trulyUnresolved.length} macro(s) have no value — creative may misbehave`, 'error');
+        trulyUnresolved.forEach(m => addLog('info', `  · ${m}`, 'error'));
+        const resolved = originalMacros.filter(m => !trulyUnresolved.includes(m));
+        if (resolved.length > 0) {
+          addLog('info', `${resolved.length} resolved:`);
+          resolved.forEach(m => addLog('info', `  · ${m}`));
+        }
       }
 
     } catch (err) {

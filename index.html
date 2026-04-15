@@ -15,7 +15,7 @@
             <h1>Looking Glass</h1>
             <span class="header-sub">Ad Preview · Moloco</span>
         </div>
-        <div class="tag-type-selector">
+        <div class="tag-type-selector" style="display:none">
             <button class="toggle active" data-type="playable">Playable</button>
             <button class="toggle" data-type="js">JS Tag</button>
             <button class="toggle" data-type="vast">VAST</button>
@@ -33,12 +33,12 @@
                         <input id="apiKeyInput" type="password" placeholder="ca_..." autocomplete="off">
                     </div>
                     <div class="field inline">
-                        <label for="platformIdInput">Platform ID <span class="label-hint">(auto-detected · override if needed)</span></label>
-                        <input id="platformIdInput" type="text" placeholder="auto-detected from creative">
-                    </div>
-                    <div class="field inline">
                         <label for="cidInput">Creative ID (CID)</label>
                         <input id="cidInput" type="text" placeholder="e.g. Q2XSOg89y3bfAuXt">
+                    </div>
+                    <div class="field inline platform-id-field">
+                        <label for="platformIdInput">Platform ID <span class="label-hint">(optional · auto-detected)</span></label>
+                        <input id="platformIdInput" type="text" placeholder="leave blank to auto-detect">
                     </div>
                     <div class="brg-row">
                         <label class="checkbox-label">

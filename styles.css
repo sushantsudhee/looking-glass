@@ -74,7 +74,7 @@ body {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
 }
 
 .field { display: grid; gap: 6px; margin-bottom: 10px; }
@@ -99,7 +99,8 @@ textarea {
 textarea:focus { outline: none; border-color: var(--primary); }
 
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+input[type="password"] {
     background: #0c0f15;
     color: var(--text);
     border: 1px solid var(--border);
@@ -290,14 +291,39 @@ select {
 }
 select:focus { outline: none; border-color: var(--primary); }
 
-/* ── CID Lookup accordion ────────────────────────────────────────────────── */
+/* ── CID Lookup (always visible, primary UX) ─────────────────────────────── */
 .cid-lookup {
     border: 1px solid var(--border);
     border-radius: 6px;
     overflow: hidden;
-    margin-bottom: 6px;
 }
-.cid-lookup summary {
+
+.section-label {
+    display: block;
+    padding: 8px 10px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: #0d0f14;
+}
+
+.cid-fields {
+    padding: 6px 10px 10px;
+    background: #0d0f14;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ── Manual paste accordion ──────────────────────────────────────────────── */
+.manual-mode {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.manual-mode > summary {
     cursor: pointer;
     padding: 7px 10px;
     font-size: 12px;
@@ -308,22 +334,21 @@ select:focus { outline: none; border-color: var(--primary); }
     align-items: center;
     gap: 6px;
 }
-.cid-lookup summary::-webkit-details-marker { display: none; }
-.cid-lookup summary::before {
+.manual-mode > summary::-webkit-details-marker { display: none; }
+.manual-mode > summary::before {
     content: '▶';
     font-size: 9px;
     transition: transform 0.15s;
 }
-.cid-lookup[open] summary::before { transform: rotate(90deg); }
-.cid-lookup summary:hover { color: var(--text); }
-
-.cid-fields {
+.manual-mode[open] > summary::before { transform: rotate(90deg); }
+.manual-mode > summary:hover { color: var(--text); }
+.manual-content {
     padding: 10px;
     background: #0d0f14;
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .label-hint { color: #565c75; font-size: 10px; font-weight: normal; }

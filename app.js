@@ -45,6 +45,7 @@
     '#START_MUTED#':                   'true',
     '#DRAW_CUSTOM_CLOSE_BUTTON#':      'false',
     '#CACHEBUSTER#':                   '',
+    '#IMP_TRACE_EVENT_PREFIX#':        EVENT_BASE_URL,
   };
 
   // Build the full macro map at preview time, reading override inputs
@@ -135,12 +136,30 @@
 
   // ─── HTML builders ─────────────────────────────────────────────────────────
 
-  // Playable + JS mode: inject the tag into an instrumented iframe document
+  // Playable + JS mode: inject the tag into an instrumented iframe document.
+  // If the content is already a full HTML document (BRG ADM), inject scripts
+  // directly rather than wrapping with document.write (which breaks WebGL).
   function buildJsPreviewHtml(userHtml, macroMap) {
     const withMacros = applyMacros(userHtml || '', macroMap);
     let sanitized = withMacros
       .replace(/<script[^>]*src\s*=\s*["']([^"']*mraid\.js[^"']*)["'][^>]*>\s*<\/script>/ig, '')
       .replace(/%\{IMP_BEACON\}/g, '');
+
+    const isFullDoc = /^\s*<!doctype\s/i.test(sanitized) || /^\s*<html[\s>]/i.test(sanitized);
+
+    if (isFullDoc) {
+      // Inject instrumentation + mraid stub into the <head> of the existing document
+      const injection =
+        '<script src="../injected/instrumentation.js"></script>' +
+        '<script src="../injected/mraid-stub.js"></script>';
+      // Prefer injecting right after <head>, fall back to before </head>
+      if (/<head>/i.test(sanitized)) {
+        return sanitized.replace(/<head>/i, '<head>' + injection);
+      } else if (/<\/head>/i.test(sanitized)) {
+        return sanitized.replace(/<\/head>/i, injection + '</head>');
+      }
+      return sanitized;
+    }
 
     const b64 = btoa(unescape(encodeURIComponent(sanitized)));
 
@@ -299,6 +318,10 @@
   });
 
   // ─── Preview ───────────────────────────────────────────────────────────────
+  // Set to true before programmatic clicks from the BRG fetch flow so that
+  // macro-presence validation is skipped (BRG already resolved all macros).
+  let _skipValidation = false;
+
   previewBtn?.addEventListener('click', () => {
     logs.length = 0;
     renderLogs();
@@ -317,7 +340,7 @@
     macroMap['#PLAYABLE_TAPS_FOR_REDIRECTION#'] = String(Math.max(0, Math.min(9,
       parseInt(redirectionTapsInput?.value || '0', 10) || 0)));
 
-    if (tagType === 'playable') {
+    if (tagType === 'playable' && !_skipValidation) {
       const validations = runPlayableValidations(userInput);
       let allOk = true;
       for (const v of validations) {
@@ -331,8 +354,8 @@
       }
     }
 
-    // Warn about any macros with no test value
-    if (tagType !== 'vast') {
+    // Warn about any macros with no test value (skip for BRG-resolved tags)
+    if (tagType !== 'vast' && !_skipValidation) {
       const resolved   = applyMacros(userInput, macroMap);
       const unresolved = findUnresolvedMacros(resolved);
       if (unresolved.length > 0) {
@@ -430,12 +453,19 @@
     if (brgSelects) brgSelects.style.display = brgToggle.checked ? '' : 'none';
   });
 
+  // ─── Base URLs (proxy-aware for local dev) ────────────────────────────────
+  const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  const API_BASE = IS_LOCAL ? '/api' : 'https://api.moloco.cloud';
+  const BRG_URL  = IS_LOCAL
+    ? '/brg/appbase.bidresponse.v1.BidResponse/GenerateBidResponse'
+    : 'https://cfe-gateway-rp76syjtkq-uc.a.run.app/appbase.bidresponse.v1.BidResponse/GenerateBidResponse';
+
   // ─── Auth token (cached per session) ──────────────────────────────────────
   let _cachedToken = null;
 
   async function getAuthToken(apiKey) {
     if (_cachedToken) return _cachedToken;
-    const res = await fetch('https://api.moloco.cloud/cm/v1/auth/tokens', {
+    const res = await fetch(`${API_BASE}/cm/v1/auth/tokens`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_key: apiKey }),
@@ -451,7 +481,7 @@
 
   // ─── Creative lookup ───────────────────────────────────────────────────────
   async function fetchCreative(token, creativeId) {
-    const res = await fetch(`https://api.moloco.cloud/cm/v1/creatives/${encodeURIComponent(creativeId)}`, {
+    const res = await fetch(`${API_BASE}/cm/v1/creatives/${encodeURIComponent(creativeId)}`, {
       headers: { 'Authorization': `Bearer ${token}` },
     });
     if (!res.ok) {
@@ -547,7 +577,6 @@
   }
 
   // ─── BRG call ──────────────────────────────────────────────────────────────
-  const BRG_URL = 'https://cfe-gateway-rp76syjtkq-uc.a.run.app/appbase.bidresponse.v1.BidResponse/GenerateBidResponse';
 
   async function callBRG(token, exchangeType, deviceOsType, creativeFormat, platformId, creativeId) {
     const body = encodeGrpcWebRequest(exchangeType, deviceOsType, creativeFormat, platformId, creativeId);
@@ -610,6 +639,14 @@
       const cType    = creative.type || 'UNKNOWN';
       addLog('info', `Creative type: ${cType}`, 'success');
 
+      // Resolve platform ID: manual override > extracted from creative response (uppercased for BRG)
+      const rawPlatformId = creative.ad_account_id || creative.platform_id || creative.account_id || '';
+      const resolvedPlatformId = platformId || rawPlatformId.toUpperCase();
+      if (!platformId && resolvedPlatformId) {
+        addLog('info', `Platform ID auto-detected: ${resolvedPlatformId}`, 'success');
+        if (platformIdInput) platformIdInput.value = resolvedPlatformId;
+      }
+
       // 3. Map creative type → tag mode
       let rawTag    = '';
       let detectedType = 'js';
@@ -638,13 +675,13 @@
       playableControls.style.display = tagType === 'playable' ? '' : 'none';
 
       // 4. BRG resolution
-      const useBrg = brgToggle?.checked && brgFormat !== null && platformId;
+      const useBrg = brgToggle?.checked && brgFormat !== null && resolvedPlatformId;
       if (useBrg) {
         const exchVal = parseInt(brgExchange?.value || '1', 10);
         const osVal   = parseInt(brgDeviceOs?.value || '1', 10);
         addLog('info', `Calling BRG (exchange=${exchVal}, os=${osVal}, format=${brgFormat})...`);
         try {
-          const brgJsonStr = await callBRG(token, exchVal, osVal, brgFormat, platformId, cid);
+          const brgJsonStr = await callBRG(token, exchVal, osVal, brgFormat, resolvedPlatformId, cid);
           const brgJson    = JSON.parse(brgJsonStr);
           const adm        = brgJson?.seatbid?.[0]?.bid?.[0]?.adm;
           if (adm) {
@@ -661,13 +698,15 @@
               : `BRG error: ${brgErr.message} — using raw creative tag.`,
             'error');
         }
-      } else if (brgFormat !== null && !platformId) {
-        addLog('info', 'Platform ID not set — skipping BRG. Macros will use test values.');
+      } else if (brgFormat !== null && !resolvedPlatformId) {
+        addLog('info', 'Platform ID not found — skipping BRG. Add it manually if needed.');
       }
 
       // 5. Fill & preview
       snippetInput.value = rawTag;
+      _skipValidation = true;
       previewBtn?.click();
+      _skipValidation = false;
 
     } catch (err) {
       addLog('error', 'Lookup failed: ' + err.message);

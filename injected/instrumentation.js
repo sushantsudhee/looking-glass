@@ -28,6 +28,11 @@
   // Event URL detection
   const EVENT_BASE = 'https://test.url/';
   const EVENT_BASE_ENC = encodeURIComponent(EVENT_BASE); // https%3A%2F%2Ftest.url%2F
+
+  function postDetectedEvent(evt) {
+    post('event', evt.kind === 'encoded' ? `unescaped ${evt.name} fired` : `${evt.name} fired`);
+  }
+
   function detectEventUrl(u) {
     try {
       const s = String(u);
@@ -75,7 +80,7 @@
     const url = normalizeUrl(arguments[0]);
     const evt = detectEventUrl(url);
     if (evt) {
-      post('event', evt.kind === 'encoded' ? `unescaped ${evt.name} fired` : `${evt.name} fired`);
+      postDetectedEvent(evt);
     }
     return originalFetch.apply(window, arguments)
       .then((res) => {
@@ -99,7 +104,7 @@
       if (isLocalUrl(_url)) return;
       const evt = detectEventUrl(_url);
       if (evt) {
-        post('event', evt.kind === 'encoded' ? `unescaped ${evt.name} fired` : `${evt.name} fired`);
+        postDetectedEvent(evt);
         return;
       }
       post('network', { url: _url, status: xhr.status });
@@ -108,7 +113,7 @@
       if (isLocalUrl(_url)) return;
       const evt = detectEventUrl(_url);
       if (evt) {
-        post('event', evt.kind === 'encoded' ? `unescaped ${evt.name} fired` : `${evt.name} fired`);
+        postDetectedEvent(evt);
         return;
       }
       post('network', { url: _url, error: 'xhr' });
@@ -125,7 +130,7 @@
         loggedImgs.add(img);
         const evt = detectEventUrl(url);
         if (evt) {
-          post('event', evt.kind === 'encoded' ? `unescaped ${evt.name} fired` : `${evt.name} fired`);
+          postDetectedEvent(evt);
           return;
         }
         post('network', ok ? { url, status: 200 } : { url, error: 'image' });
@@ -181,5 +186,3 @@
     }, true);
   } catch (e) { /* ignore */ }
 })();
-
-

@@ -108,10 +108,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(str(e).encode())
 
     def do_GET(self):
-        if self._proxy_target():
-            self._do_proxy('GET')
-        else:
-            super().do_GET()
+        self._do_proxy('GET')
 
     def do_POST(self):
         self._do_proxy('POST')

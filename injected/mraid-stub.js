@@ -22,26 +22,18 @@
     setOrientationProperties() { return {}; }
     open(url) {
       try {
-        var clickedUrl = url || '';
-        var decoded = '';
-        var isEncoded = false;
-        var msg = '';
-        // Check for empty URL parameter
-        if (!url || clickedUrl === '') {
+        const u = url || '';
+        let msg;
+        if (!u) {
           msg = 'empty-url mraid.open() called with empty/missing URL';
         } else {
-          try {
-            decoded = decodeURIComponent(clickedUrl);
-            isEncoded = decoded !== clickedUrl;
-          } catch (_) {
-            isEncoded = false;
-          }
-          msg = (isEncoded ? 'unescaped ' : '') + 'CTA button clicked: ' + clickedUrl;
+          let isEncoded = false;
+          try { isEncoded = decodeURIComponent(u) !== u; } catch (_) {}
+          msg = (isEncoded ? 'unescaped ' : '') + 'CTA button clicked: ' + u;
         }
         parent.postMessage({ __preview__: true, type: 'event', message: msg }, '*');
       } catch (e) {
         console.error('Mraid.open error', e);
-        return true;
       }
       return true;
     }
@@ -53,5 +45,3 @@
   }
   window.mraid = new Mraid();
 })();
-
-

@@ -15,15 +15,18 @@
     vast:     { label: 'VAST tag',         placeholder: 'Paste a VAST XML string, or a VAST URL starting with https://...' },
   };
 
+  function setTagType(type) {
+    tagType = type;
+    document.querySelectorAll('.tag-type-selector .toggle').forEach(b =>
+      b.classList.toggle('active', b.dataset.type === type)
+    );
+    snippetLabel.textContent       = TYPE_META[type].label;
+    snippetInput.placeholder       = TYPE_META[type].placeholder;
+    playableControls.style.display = type === 'playable' ? '' : 'none';
+  }
+
   document.querySelectorAll('.tag-type-selector .toggle').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tag-type-selector .toggle').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      tagType = btn.dataset.type;
-      snippetLabel.textContent         = TYPE_META[tagType].label;
-      snippetInput.placeholder         = TYPE_META[tagType].placeholder;
-      playableControls.style.display   = tagType === 'playable' ? '' : 'none';
-    });
+    btn.addEventListener('click', () => setTagType(btn.dataset.type));
   });
 
   // ─── Macro maps ────────────────────────────────────────────────────────────
@@ -59,9 +62,10 @@
 
     // These change every render, like in production
     const cachebuster = String(Math.floor(Math.random() * 1e9));
-    const mtid        = 'test-mtid-' + Math.random().toString(36).substr(2, 8);
+    const mtid        = 'test-mtid-' + Math.random().toString(36).slice(2, 10);
 
-    return Object.assign({}, PLAYABLE_MACRO_MAP, {
+    return {
+      ...PLAYABLE_MACRO_MAP,
       // ── {{curly}} format — used in VAST and many JS tags ──
       '{{mtid}}':             mtid,
       '{{bundle}}':           bundle,
@@ -82,7 +86,7 @@
       '#CLICK_URL_ESC#':  encodeURIComponent(clickUrl),
       '#IMPRESSION_URL#': EVENT_BASE_URL + 'impression',
       '#CACHEBUSTER#':    cachebuster,
-    });
+    };
   }
 
   // Replace all #MACRO# and {{macro}} tokens in a string
@@ -201,8 +205,12 @@
           'if(isUrl){var res=await fetch(input);xml=await res.text();}' +
           'else{xml=input;}' +
           'var doc=(new DOMParser()).parseFromString(xml,"text/xml");' +
-          'var mediaEl=doc.querySelector("MediaFile");' +
+          // Prefer H.264 (avc) over H.265 (hvc/hevc/h265) — Chrome doesn\'t support H.265.
+          'var allMediaFiles=Array.from(doc.querySelectorAll("MediaFile"));' +
+          'var h264=allMediaFiles.filter(function(m){var u=(m.textContent||"").toLowerCase();return !u.includes("h265")&&!u.includes("hevc")&&!u.includes("hvc");});' +
+          'var mediaEl=(h264.length?h264:allMediaFiles)[0]||null;' +
           'var videoUrl=mediaEl?mediaEl.textContent.trim():null;' +
+          'if(videoUrl&&videoUrl.startsWith("<![CDATA[")){videoUrl=videoUrl.replace(/^<!\\[CDATA\\[/,"").replace(/\\]\\]>$/,"").trim();}' +
           'if(!videoUrl){status.textContent="No MediaFile found in VAST.";return;}' +
           'var impressions=Array.from(doc.querySelectorAll("Impression"))' +
             '.map(function(el){return el.textContent.trim();}).filter(Boolean);' +
@@ -215,11 +223,18 @@
             'message:"VAST parsed — MediaFile: "+videoUrl},\'*\');' +
           'parent.postMessage({__preview__:true,type:"info",' +
             'message:"Trackers: impressions="+impressions.length+", events="+JSON.stringify(Object.keys(trackings))},\'*\');' +
-          'status.remove();' +
+          'status.style.display="none";' +
           'var v=document.createElement("video");' +
           'v.src=videoUrl;v.controls=true;v.autoplay=true;v.muted=true;' +
           'v.style.cssText="max-width:100%;max-height:90%;";' +
           'document.body.appendChild(v);' +
+          'v.addEventListener("error",function(){' +
+            'var msg="Video failed to load";' +
+            'if(videoUrl.toLowerCase().includes("h265")||videoUrl.toLowerCase().includes("hevc")){msg="H.265/HEVC codec not supported in this browser — BRG returned an H.265 file. Try a different exchange or use Safari.";}' +
+            'status.style.cssText="display:block;color:#ff9f0a;font-family:monospace;font-size:11px;padding:12px;text-align:center";' +
+            'status.textContent=msg;' +
+            'parent.postMessage({__preview__:true,type:"error",message:msg},"*");' +
+          '});' +
           'v.addEventListener("play",async function(){' +
             'for(var u of impressions){try{await fetch(u,{mode:"no-cors"});}catch(e){}}' +
             'for(var u of(trackings.start||[])){try{await fetch(u,{mode:"no-cors"});}catch(e){}}' +
@@ -254,34 +269,49 @@
   const logs = [];
   let activeTab = 'all';
 
+  const MAX_MSG_CHARS = 500;
+
+  function makeLogEntry(l) {
+    const div = document.createElement('div');
+    div.className = 'log-entry ' + l.type;
+    if (l.extraClass) div.classList.add(l.extraClass);
+
+    let msgStr = typeof l.message === 'string' ? l.message : safeStringify(l.message);
+    if (l.type === 'event' && msgStr.startsWith('unescaped')) div.classList.add('unescaped');
+    if (l.type === 'event' && msgStr.startsWith('empty-url')) div.classList.add('empty-url');
+
+    // Truncate giant strings (e.g. base64 asset bundles logged by playable SDKs)
+    if (msgStr.length > MAX_MSG_CHARS) {
+      const kb = (msgStr.length / 1024).toFixed(1);
+      msgStr = msgStr.slice(0, MAX_MSG_CHARS) + ` … [truncated ${kb} kB]`;
+    }
+
+    const timeEl = document.createElement('span');
+    timeEl.className   = 'time';
+    timeEl.textContent = '[' + new Date(l.time).toLocaleTimeString() + ']';
+
+    const content = document.createElement('span');
+    content.textContent = l.type.toUpperCase() + ' ' + msgStr;
+
+    div.appendChild(timeEl);
+    div.appendChild(content);
+    return div;
+  }
+
   function addLog(type, message, extraClass) {
-    logs.push({ type, time: Date.now(), message, extraClass });
-    renderLogs();
+    const entry = { type, time: Date.now(), message, extraClass };
+    logs.push(entry);
+    // Append incrementally — only rebuild if the tab filter would hide this entry
+    if (activeTab === 'all' || type === activeTab) {
+      logList.appendChild(makeLogEntry(entry));
+      logList.scrollTop = logList.scrollHeight;
+    }
   }
 
   function renderLogs() {
-    const frag     = document.createDocumentFragment();
+    const frag = document.createDocumentFragment();
     const filtered = logs.filter(l => activeTab === 'all' || l.type === activeTab);
-    for (const l of filtered) {
-      const div = document.createElement('div');
-      div.className = 'log-entry ' + l.type;
-      if (l.extraClass) div.classList.add(l.extraClass);
-
-      const msgStr = typeof l.message === 'string' ? l.message : safeStringify(l.message);
-      if (l.type === 'event' && msgStr.startsWith('unescaped')) div.classList.add('unescaped');
-      if (l.type === 'event' && msgStr.startsWith('empty-url')) div.classList.add('empty-url');
-
-      const timeEl = document.createElement('span');
-      timeEl.className   = 'time';
-      timeEl.textContent = '[' + new Date(l.time).toLocaleTimeString() + ']';
-
-      const content = document.createElement('span');
-      content.textContent = l.type.toUpperCase() + ' ' + msgStr;
-
-      div.appendChild(timeEl);
-      div.appendChild(content);
-      frag.appendChild(div);
-    }
+    for (const l of filtered) frag.appendChild(makeLogEntry(l));
     logList.innerHTML = '';
     logList.appendChild(frag);
     logList.scrollTop = logList.scrollHeight;
@@ -609,6 +639,16 @@
     throw new Error('No data frame in BRG response');
   }
 
+  // Synthesise a minimal VAST wrapper around a direct MP4 URL.
+  // Used when the creative has no VAST XML, or when BRG returns H.265-only.
+  function synthesizeVast(videoUrl) {
+    return `<VAST version="2.0"><Ad><InLine><AdSystem>LookingGlass</AdSystem>` +
+      `<AdTitle>Direct Preview</AdTitle><Creatives><Creative><Linear>` +
+      `<Duration>00:01:00</Duration><MediaFiles>` +
+      `<MediaFile type="video/mp4" delivery="progressive"><![CDATA[${videoUrl}]]></MediaFile>` +
+      `</MediaFiles></Linear></Creative></Creatives></InLine></Ad></VAST>`;
+  }
+
   // ─── Fetch & Preview handler ───────────────────────────────────────────────
   fetchPreviewBtn?.addEventListener('click', async () => {
     const apiKey     = apiKeyInput?.value.trim()    || '';
@@ -660,23 +700,29 @@
         detectedType = 'vast';
         brgFormat    = 1;
         rawTag       = creative.video?.vast_url || creative.video?.vast_xml || '';
+        // Fallback: if no VAST is stored in the creative, synthesise a minimal one from
+        // the direct video_url (H.264 original) so the VAST player has something to show.
+        if (!rawTag && creative.video?.video_url) {
+          rawTag = synthesizeVast(creative.video.video_url);
+          addLog('info', 'No VAST on creative — synthesised from video_url for preview.');
+        }
       } else {
         addLog('info', `Type ${cType} — BRG not supported. Showing raw creative JSON.`);
         rawTag = JSON.stringify(creative, null, 2);
       }
 
       // Switch tag-type UI
-      document.querySelectorAll('.tag-type-selector .toggle').forEach(b => b.classList.remove('active'));
-      const typeBtn = document.querySelector(`.tag-type-selector .toggle[data-type="${detectedType}"]`);
-      if (typeBtn) typeBtn.classList.add('active');
-      tagType = detectedType;
-      snippetLabel.textContent       = TYPE_META[tagType].label;
-      snippetInput.placeholder       = TYPE_META[tagType].placeholder;
-      playableControls.style.display = tagType === 'playable' ? '' : 'none';
+      setTagType(detectedType);
 
       // 4. BRG resolution
       const useBrg = brgToggle?.checked && brgFormat !== null && resolvedPlatformId;
-      const originalMacros = findUnresolvedMacros(rawTag); // macros in raw creative
+      // For VIDEO creatives the VAST has no #MACRO# tokens — they live in the playable endcard.
+      // Scan the endcard HTML too so the macro report is meaningful.
+      const endcardHtml = cType === 'VIDEO' ? (creative.video?.playable_endcard?.entry_html || '') : '';
+      const originalMacros = [...new Set([
+        ...findUnresolvedMacros(rawTag),
+        ...findUnresolvedMacros(endcardHtml)
+      ])];
       let brgResolved = false;
 
       if (useBrg) {
@@ -690,6 +736,16 @@
           if (adm) {
             rawTag = adm;
             brgResolved = true;
+            // For VIDEO: warn if BRG only returned H.265 (unsupported in Chrome)
+            if (cType === 'VIDEO' && /h265|hevc|hvc/i.test(adm) && !/h264|avc/i.test(adm)) {
+              const fallbackUrl = creative.video?.video_url;
+              if (fallbackUrl) {
+                addLog('info', 'BRG VAST contains only H.265 (unsupported in Chrome) — falling back to direct video_url.', 'error');
+                rawTag = synthesizeVast(fallbackUrl);
+              } else {
+                addLog('info', 'BRG VAST contains only H.265 — may not play in Chrome.', 'error');
+              }
+            }
             addLog('info', 'BRG ADM extracted — macros resolved by production ADM system.', 'success');
           } else {
             addLog('info', 'BRG response contained no ADM — using raw creative tag.', 'error');
